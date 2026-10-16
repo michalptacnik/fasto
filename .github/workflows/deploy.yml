@@ -1,0 +1,46 @@
+name: Deploy fasto.ll.land
+
+# Takes the fasto/ folder from liberland/site (which stays untouched),
+# builds it the same way as the main site, rewrites the old
+# liberlandlimited.com/fasto URLs, and publishes it at https://fasto.ll.land
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 * * * *'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: liberland/site
+          ref: master
+      - uses: actions/configure-pages@v5
+      - name: Generate Fasto pages
+        run: python3 fasto/build.py
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r fasto/. _site/
+          grep -rlI 'liberlandlimited\.com/fasto' _site | xargs -r sed -i 's#liberlandlimited\.com/fasto#fasto.ll.land#g'
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
