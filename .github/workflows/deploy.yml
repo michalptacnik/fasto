@@ -1,15 +1,16 @@
 name: Deploy fasto.ll.land
 
-# Takes the fasto/ folder from liberland/site (which stays untouched),
-# builds it the same way as the main site, rewrites the old
-# liberlandlimited.com/fasto URLs, and publishes it at https://fasto.ll.land
+# Takes the fasto/ folder from liberland/site, builds it the same way as the
+# main site and publishes it at https://fasto.ll.land (the site's canonical home).
+# Every 5 minutes it checks whether fasto/ changed since the last deploy
+# (the deployed commit is written to /version.txt) and only deploys when it did.
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
   schedule:
-    - cron: '23 * * * *'
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: read
@@ -18,10 +19,33 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.src.outputs.sha }}
+      deploy: ${{ steps.src.outputs.deploy }}
+    steps:
+      - id: src
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          sha=$(gh api "repos/liberland/site/commits?sha=master&path=fasto&per_page=1" --jq '.[0].sha')
+          live=$(curl -fsS --max-time 20 https://fasto.ll.land/version.txt 2>/dev/null | tr -d '[:space:]' || true)
+          echo "latest fasto/ commit: $sha, deployed: ${live:-none}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" != "schedule" ] || [ "$sha" != "$live" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
+    needs: check
+    if: needs.check.outputs.deploy == 'true'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -30,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: liberland/site
-          ref: master
+          ref: ${{ needs.check.outputs.sha }}
       - uses: actions/configure-pages@v5
       - name: Generate Fasto pages
         run: python3 fasto/build.py
@@ -38,7 +62,9 @@ jobs:
         run: |
           mkdir -p _site
           cp -r fasto/. _site/
+          # Safety net for any leftover links to the old address
           grep -rlI 'liberlandlimited\.com/fasto' _site | xargs -r sed -i 's#liberlandlimited\.com/fasto#fasto.ll.land#g'
+          echo "${{ needs.check.outputs.sha }}" > _site/version.txt
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
