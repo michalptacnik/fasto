@@ -2,11 +2,16 @@ name: Deploy fasto.ll.land
 
 # Takes the fasto/ folder from liberland/site, builds it the same way as the
 # main site and publishes it at https://fasto.ll.land (the site's canonical home).
-# Every 5 minutes it checks whether fasto/ changed since the last deploy
-# (the deployed commit is written to /version.txt) and only deploys when it did.
+# liberland/site sends a repository_dispatch "fasto-updated" after every change to
+# fasto/ (needs the FASTO_DISPATCH_TOKEN secret there), so updates go out within a
+# minute or two. The schedule is only a fallback: GitHub runs "*/5" crons far less
+# often in practice. A scheduled run deploys only when fasto/ changed since the last
+# deploy (the deployed commit is written to /version.txt).
 
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types: [fasto-updated]
   push:
     branches: [main]
   schedule:
